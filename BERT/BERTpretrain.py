@@ -1,9 +1,3 @@
-#!/usr/bin/env python
-# coding: utf-8
-
-# In[3]:
-
-
 import json
 import torch
 import torch.nn as nn
@@ -16,9 +10,6 @@ import sentencepiece as spm
 from model import *
 
 
-# In[4]:
-
-
 class Config(dict):
   __getattr__ = dict.__getitem__
   __setattr__ = dict.__setitem__
@@ -28,36 +19,6 @@ class Config(dict):
       config = json.loads(f.read())
       return Config(config)
 
-
-# In[5]:
-
-
-vocab_file = "/content/drive/MyDrive/NLP/BERT/kowiki_8000.model"
-vocab = spm.SentencePieceProcessor()
-vocab.load(vocab_file)
-print(vocab.get_piece_size())
-
-
-# In[6]:
-
-
-config = Config()
-config = config.load('/content/drive/MyDrive/NLP/BERT/config.json')
-
-
-# In[7]:
-
-
-config.n_enc_vocab = len(vocab)
-
-
-# In[8]:
-
-
-config
-
-
-# In[9]:
 
 
 class PretrainDataSet(torch.utils.data.Dataset):
@@ -99,8 +60,6 @@ class PretrainDataSet(torch.utils.data.Dataset):
                 torch.tensor(self.segments[item]))
 
 
-# In[10]:
-
 
 def pretrin_collate_fn(inputs):
     labels_cls, labels_lm, inputs, segments = list(zip(*inputs))
@@ -118,7 +77,6 @@ def pretrin_collate_fn(inputs):
     return batch
 
 
-# In[11]:
 
 
 def train_epoch(config, epoch, model, criterion_lm, criterion_cls, optimizer, train_loader):
@@ -148,69 +106,57 @@ def train_epoch(config, epoch, model, criterion_lm, criterion_cls, optimizer, tr
     return np.mean(losses)
 
 
-# In[12]:
+
+if __name__ == "__main__":
+
+    vocab_file = "/content/drive/MyDrive/NLP/BERT/kowiki_8000.model"
+    vocab = spm.SentencePieceProcessor()
+    vocab.load(vocab_file)
+
+    config = Config()
+    config = config.load('/content/drive/MyDrive/NLP/BERT/config.json')
+    config.n_enc_vocab = len(vocab)
+    config.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    torch.cuda.empty_cache()
+
+    batch_size = 8
+    count = 5
+    learning_rate = 5e-5
+    n_epoch = 3
+    data_dir = '/content/drive/MyDrive/NLP/BERT/bert_kowiki_out_8000'
+
+    dataset = PretrainDataSet(vocab, f"{data_dir}/kowiki_bert_8000_0.json")
+    train_loader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=True, collate_fn=pretrin_collate_fn)
 
 
-config.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model = BERTPretrain(config)
+    save_pretrain = f"{data_dir}/save_bert_pretrain.pth"
+    best_epoch, best_loss = 0, 0
+    if os.path.isfile(save_pretrain):
+        best_epoch, best_loss = model.bert.load(save_pretrain)
+        print(f"load pretrain from: {save_pretrain}, epoch={best_epoch}, loss={best_loss}")
+        best_epoch += 1
 
+    model.to(config.device)
 
-# In[13]:
+    criterion_lm = torch.nn.CrossEntropyLoss(ignore_index=-1, reduction='mean')
+    criterion_cls = torch.nn.CrossEntropyLoss()
+    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
 
+    losses = []
+    offset = best_epoch
+    for step in range(n_epoch):
+        epoch = step + offset
+        if 0 < step:
+            del train_loader
+            dataset = PretrainDataSet(vocab, f"{data_dir}/kowiki_bert_8000_{epoch % count}.json")
+            train_loader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=True, collate_fn=pretrin_collate_fn)
 
-torch.cuda.empty_cache()
+        loss = train_epoch(config, epoch, model, criterion_lm, criterion_cls, optimizer, train_loader)
+        losses.append(loss)
+        model.bert.save(epoch, loss, save_pretrain)
 
-
-# In[14]:
-
-
-batch_size = 8
-count = 5
-learning_rate = 5e-5
-n_epoch = 3
-data_dir = '/content/drive/MyDrive/NLP/BERT/bert_kowiki_out_8000'
-
-
-# In[15]:
-
-
-dataset = PretrainDataSet(vocab, f"{data_dir}/kowiki_bert_8000_0.json")
-train_loader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=True, collate_fn=pretrin_collate_fn)
-
-
-# In[16]:
-
-
-model = BERTPretrain(config)
-
-
-save_pretrain = f"{data_dir}/save_bert_pretrain_test.pth"
-best_epoch, best_loss = 0, 0
-if os.path.isfile(save_pretrain):
-    best_epoch, best_loss = model.bert.load(save_pretrain)
-    print(f"load pretrain from: {save_pretrain}, epoch={best_epoch}, loss={best_loss}")
-    best_epoch += 1
-
-model.to(config.device)
-
-criterion_lm = torch.nn.CrossEntropyLoss(ignore_index=-1, reduction='mean')
-criterion_cls = torch.nn.CrossEntropyLoss()
-optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
-
-losses = []
-offset = best_epoch
-for step in range(n_epoch):
-    epoch = step + offset
-    if 0 < step:
-        del train_loader
-        dataset = PretrainDataSet(vocab, f"{data_dir}/kowiki_bert_8000_{epoch % count}.json")
-        train_loader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=True, collate_fn=pretrin_collate_fn)
-
-    loss = train_epoch(config, epoch, model, criterion_lm, criterion_cls, optimizer, train_loader)
-    losses.append(loss)
-    model.bert.save(epoch, loss, save_pretrain)
-
-
-# In[ ]:
 
 
 
